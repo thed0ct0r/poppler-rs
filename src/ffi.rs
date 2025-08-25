@@ -49,4 +49,7 @@ extern "C" {
     );
 
     pub fn poppler_page_get_text(page: *mut PopplerPage) -> *mut c_char;
+    pub fn poppler_page_get_text_layout_boxes(
+        page: *mut PopplerPage,
+    ) -> *mut glib::ffi::GList;
 }

@@ -6,6 +6,7 @@ use std::path;
 /// Re-exports `cairo` to provide types required for rendering.
 #[cfg(feature = "render")]
 pub use cairo;
+use glib::translate::FromGlibPtrFull;
 
 mod ffi;
 mod util;
@@ -17,6 +18,24 @@ pub struct PopplerDocument(*mut ffi::PopplerDocument);
 /// Represents a page in a [`PopplerDocument`].
 #[derive(Debug)]
 pub struct PopplerPage(*mut ffi::PopplerPage);
+
+/// PopplerRectangle has fields: x1, y1, x2, y2, text_string
+/// We can't use the PopplerRectangle struct directly in Rust FFI due to its
+/// complex GValue and GList structure. We'll reconstruct it.
+/// The raw pointers are:
+/// x1: c_double
+/// y1: c_double
+/// x2: c_double
+/// y2: c_double
+/// text: GValue
+/// We will represent this as a Rust struct.
+#[derive(Debug, Clone)]
+struct PopplerTextBox {
+    text: String,
+    x: f64,
+    y: f64,
+    height: f64,
+}
 
 impl PopplerDocument {
     /// Creates a new Poppler document.
@@ -115,7 +134,7 @@ impl PopplerDocument {
         }
     }
 
-    pub fn pages(&self) -> PagesIter {
+    pub fn pages(&self) -> PagesIter<'_> {
         PagesIter {
             total: self.get_n_pages(),
             index: 0,
@@ -126,7 +145,7 @@ impl PopplerDocument {
 
     /// Converts the provided password into a `CString`.
     fn get_password(password: Option<&str>) -> Result<CString, glib::error::Error> {
-        Ok(CString::new(if password.is_none() {
+        CString::new(if password.is_none() {
             ""
         } else {
             password.expect("password.is_none() is false, but apparently it's lying.")
@@ -136,7 +155,7 @@ impl PopplerDocument {
                     glib::FileError::Inval,
                     "Password invalid (possibly contains NUL characters)",
                 )
-            })?)
+            })
     }
 
     /// Returns the number of pages.
@@ -215,6 +234,70 @@ impl PopplerPage {
         match unsafe { ffi::poppler_page_get_text(self.0) } {
             ptr if ptr.is_null() => None,
             ptr => unsafe { Some(CStr::from_ptr(ptr).to_str().unwrap_or_default()) },
+        }
+    }
+
+    pub fn get_all_text(&self) -> Option<String> {
+        unsafe {
+            let list_ptr = ffi::poppler_page_get_text_layout_boxes(self.0);
+
+            if list_ptr.is_null() {
+                return None;
+            }
+
+            let mut text_boxes = Vec::new();
+            let mut current_item = list_ptr;
+
+            while !current_item.is_null() {
+                let data = (*current_item).data;
+
+                // Extract data from the raw pointer. This relies on the internal layout
+                // of PopplerRectangle which is: x1, y1, x2, y2, and then a GValue pointer.
+                let x1 = *(data as *const c_double);
+                let y1 = *(data as *const c_double).offset(1);
+                let y2 = *(data as *const c_double).offset(3);
+                let gvalue_ptr = *(data as *const *mut gobject_sys::GValue).offset(4);
+
+                let gvalue = glib::Value::from_glib_full(gvalue_ptr);
+                let text = gvalue.get::<&str>().unwrap_or_default().to_string();
+
+                let height = y2 - y1;
+
+                text_boxes.push(PopplerTextBox {
+                    text,
+                    x: x1,
+                    y: y1,
+                    height,
+                });
+
+                current_item = (*current_item).next;
+            }
+
+            // Free the original GList
+            glib::ffi::g_list_free(list_ptr);
+
+            // Sort the text boxes by y-coordinate (top-to-bottom) and then x-coordinate (left-to-right)
+            text_boxes.sort_by(|a, b| {
+                let y_diff = (a.y - b.y).abs();
+                if y_diff < a.height.min(b.height) * 0.5 {
+                    a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal)
+                } else {
+                    a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal)
+                }
+            });
+
+            // Reconstruct the full text from the sorted boxes
+            let mut full_text = String::new();
+            let mut current_y = -1.0;
+            for box_ in text_boxes {
+                if (box_.y - current_y).abs() > 0.1 && current_y != -1.0 {
+                    full_text.push('\n');
+                }
+                full_text.push_str(&box_.text);
+                current_y = box_.y;
+            }
+
+            Some(full_text)
         }
     }
 }
