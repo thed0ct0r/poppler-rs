@@ -263,7 +263,7 @@ impl PopplerPage {
                 return Some((text, Vec::new()));
             }
 
-            let rects = util::take_c_owned_rect_array(
+            let rects = util::take_c_owned_rects(
                 rects_ptr,
                 n_rects as usize,
             );
@@ -290,7 +290,7 @@ impl PopplerPage {
         // ------- 1. zip text + rectangles into one vector ----------
         let mut glyphs: Vec<(char, ffi::PopplerRectangle)> = text
             .chars()
-            .zip(rects.into_iter())
+            .zip(rects)
             .collect();
 
         // sort *visually* – poppler page coords start at (0,0) in the
@@ -377,6 +377,96 @@ impl PopplerPage {
         flush_line(&mut current_line, &mut result);
 
         Some(result)
+    }
+
+    /// Returns every character on the page together with an optional
+    /// bounding rectangle (newlines and other non-printable chars have
+    /// `None`).  Always succeeds if Poppler could retrieve *any* text.
+    fn glyph_stream(
+        &self,
+    ) -> Option<(String, Vec<Option<ffi::PopplerRectangle>>)> {
+        unsafe {
+            // --- raw UTF-8 text -------------------------------------------------
+            let txt_ptr = ffi::poppler_page_get_text(self.0);
+            let text = util::take_c_owned_string(txt_ptr)?;
+
+            // --- rectangles (one per *glyph*, no entries for '\n') --------------
+            let mut rect_ptr: *mut ffi::PopplerRectangle = std::ptr::null_mut();
+            let mut n: c_uint = 0;
+            ffi::poppler_page_get_text_layout(self.0, &mut rect_ptr, &mut n);
+
+            let rects = util::take_c_owned_rects(rect_ptr, n as usize);
+
+            // map glyph rectangles into the character stream  -------------------
+            let mut mapped: Vec<Option<ffi::PopplerRectangle>> =
+                Vec::with_capacity(text.chars().count());
+
+            let mut r_it = rects.into_iter();
+            for ch in text.chars() {
+                if ch == '\n' || ch == '\r' {
+                    mapped.push(None);
+                } else {
+                    mapped.push(r_it.next());
+                }
+            }
+            Some((text, mapped))
+        }
+    }
+
+    /// *Exact* visual layout (equivalent to `pdftotext -layout`).
+    ///
+    /// • preserves line-breaks inserted by Poppler  
+    /// • inserts the correct number of blank spaces by measuring glyph gaps  
+    /// • keeps the original character order (no extra bidi processing)
+    pub fn get_text_layout_exact(&self) -> Option<String> {
+        let (raw_text, glyphs) = self.glyph_stream()?;
+
+        // mean glyph width – used as space unit
+        let mut w_sum = 0.0;
+        let mut w_cnt = 0usize;
+
+        for r in glyphs.iter().flatten() {
+            w_sum += (r.x2 - r.x1).abs();
+            w_cnt += 1;
+        }
+
+        let avg_w = if w_cnt == 0 { 5.0 } else { w_sum / w_cnt as f64 };
+
+        // build output ----------------------------------------------------------
+        let mut out = String::with_capacity(raw_text.len() + 32);
+        let mut prev_rect: Option<ffi::PopplerRectangle> = None;
+
+        for (ch, rect_opt) in raw_text.chars().zip(glyphs.into_iter()) {
+            match ch {
+                '\n' | '\r' => {
+                    out.push('\n');
+                    prev_rect = None;
+                }
+
+                _ => {
+                    // spacing: only when both current AND previous have rects
+                    if let (Some(prev), Some(rect)) = (prev_rect, rect_opt) {
+                        let gap = (rect.x1 - prev.x2).abs();
+
+                        // number of spaces needed to approximate the gap
+                        let mut n_spaces = ((gap / avg_w) + 0.5 /* round */) as usize;
+
+                        // Poppler already emits real space glyphs – do not
+                        // double-insert when the current character *is* one.
+                        if ch == ' ' { n_spaces = n_spaces.saturating_sub(1); }
+
+                        for _ in 0..n_spaces {
+                            out.push(' ');
+                        }
+                    }
+
+                    out.push(ch);
+                    prev_rect = rect_opt;
+                }
+            }
+        }
+
+        Some(out)
     }
 }
 
