@@ -215,28 +215,36 @@ impl<'a> PopplerPage<'a> {
             };
             util::take_c_owned_string(ptr)
         }))
-        .map_err(|err| anyhow::anyhow!("failed ffi call in underlying poppler c code => {err:?}"))?;
+        .map_err(|err| {
+            anyhow::anyhow!("failed ffi call in underlying poppler c code => {err:?}")
+        })?;
 
         // The result of catch_unwind is a Result<Option<String>, Panic>.
         // We map over the successful case to apply RTL formatting fixes.
-        Ok(result.map(|s| {
-            s.lines()
-             .map(|line| {
-                 // Analyze the line to determine its base direction.
-                 let bidi_info = unicode_bidi::BidiInfo::new(line, None);
+        Ok(result.map(|text| {
+            text.lines()
+                .map(|line| {
+                    // Analyze the line to determine its base direction.
+                    let bidi_info = unicode_bidi::BidiInfo::new(line, None);
 
-                 // A line can have multiple paragraphs, but for single lines
-                 // of text, we only need to check the first one.
-                 if bidi_info.paragraphs.first().is_some_and(|p| p.level.is_rtl()) {
-                     // If the line is RTL, reverse the order of its words.
-                     std::borrow::Cow::Owned(line.split_whitespace().rev().collect::<Vec<_>>().join(" "))
-                 } else {
-                     // Otherwise, return the line as is.
-                     std::borrow::Cow::Borrowed(line)
-                 }
-             })
-             .collect::<Vec<_>>()
-             .join("\n")
+                    // A line can have multiple paragraphs, but for single lines
+                    // of text, we only need to check the first one.
+                    if bidi_info
+                        .paragraphs
+                        .first()
+                        .is_some_and(|p| p.level.is_rtl())
+                    {
+                        // If the line is RTL, reverse the order of its words.
+                        std::borrow::Cow::Owned(
+                            line.split_whitespace().rev().collect::<Vec<_>>().join(" "),
+                        )
+                    } else {
+                        // Otherwise, return the line as is.
+                        std::borrow::Cow::Borrowed(line)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
         }))
     }
 }

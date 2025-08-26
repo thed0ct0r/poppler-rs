@@ -7,8 +7,9 @@ fn main() {
         .expect("Failed to find poppler-cpp. Please ensure that the poppler development libraries are installed.");
     let poppler_core = pkg_config::probe_library("poppler")
         .expect("Failed to find poppler (core). Please ensure that the poppler development libraries are installed.");
-    let glib = pkg_config::probe_library("glib-2.0")
-        .expect("Failed to find glib-2.0. Please ensure that the glib development libraries are installed.");
+    let glib = pkg_config::probe_library("glib-2.0").expect(
+        "Failed to find glib-2.0. Please ensure that the glib development libraries are installed.",
+    );
 
     // Combine the include paths from all required libraries.
     let mut includes = poppler_cpp.include_paths;
