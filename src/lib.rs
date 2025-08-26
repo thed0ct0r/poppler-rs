@@ -229,10 +229,10 @@ impl<'a> PopplerPage<'a> {
                  // of text, we only need to check the first one.
                  if bidi_info.paragraphs.first().is_some_and(|p| p.level.is_rtl()) {
                      // If the line is RTL, reverse the order of its words.
-                     line.split_whitespace().rev().collect::<Vec<_>>().join(" ")
+                     std::borrow::Cow::Owned(line.split_whitespace().rev().collect::<Vec<_>>().join(" "))
                  } else {
                      // Otherwise, return the line as is.
-                     line.to_string()
+                     std::borrow::Cow::Borrowed(line)
                  }
              })
              .collect::<Vec<_>>()
