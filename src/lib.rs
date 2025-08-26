@@ -199,7 +199,7 @@ impl<'a> PopplerPage<'a> {
     pub fn get_text_layout(&self) -> anyhow::Result<Option<String>> {
         // Use catch_unwind to ensure that a panic in the C++ code does not
         // cross the FFI boundary, which would be undefined behavior.
-        catch_unwind(AssertUnwindSafe(|| unsafe {
+        let result = catch_unwind(AssertUnwindSafe(|| unsafe {
             let ptr = match &self.doc.source {
                 DocumentSource::File { uri } => ffi::extract_text_layout_from_file(
                     uri.as_ptr(),
@@ -215,7 +215,29 @@ impl<'a> PopplerPage<'a> {
             };
             util::take_c_owned_string(ptr)
         }))
-        .map_err(|err| anyhow::anyhow!("failed ffi call in underlying poppler c code => {err:?}"))
+        .map_err(|err| anyhow::anyhow!("failed ffi call in underlying poppler c code => {err:?}"))?;
+
+        // The result of catch_unwind is a Result<Option<String>, Panic>.
+        // We map over the successful case to apply RTL formatting fixes.
+        Ok(result.map(|s| {
+            s.lines()
+             .map(|line| {
+                 // Analyze the line to determine its base direction.
+                 let bidi_info = unicode_bidi::BidiInfo::new(line, None);
+
+                 // A line can have multiple paragraphs, but for single lines
+                 // of text, we only need to check the first one.
+                 if bidi_info.paragraphs.first().is_some_and(|p| p.level.is_rtl()) {
+                     // If the line is RTL, reverse the order of its words.
+                     line.split_whitespace().rev().collect::<Vec<_>>().join(" ")
+                 } else {
+                     // Otherwise, return the line as is.
+                     line.to_string()
+                 }
+             })
+             .collect::<Vec<_>>()
+             .join("\n")
+        }))
     }
 }
 

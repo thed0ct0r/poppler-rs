@@ -15,9 +15,10 @@ render = ["dep:cairo-rs"]
 
 [dependencies]
 anyhow = ">=1.0"
-cairo-rs = { version = "0.20.5", features = ["png", "pdf"], optional = true }
-glib = "0.20.6"
-gobject-sys = "0.20"
+cairo-rs = { version = ">=0.21", features = ["png", "pdf"], optional = true }
+glib = ">=0.21"
+gobject-sys = ">=0.21"
+unicode-bidi = ">=0.3"
 
 [build-dependencies]
 cc = ">=1.2"
