@@ -1,6 +1,6 @@
 use std::ffi::{CStr, CString, OsString};
-use std::{fs, path, ptr};
 use std::os::raw::c_char;
+use std::{fs, path, ptr};
 
 use glib::translate::FromGlibPtrFull;
 

@@ -86,7 +86,6 @@ extern "C" {
     ) -> glib::ffi::gboolean;
 }
 
-
 // Declarations for our custom C++ shim functions.
 // The name "text_extractor" matches the library name we chose in build.rs.
 #[link(name = "text_extractor")]

@@ -13,14 +13,14 @@ fn main() {
     includes.sort();
     includes.dedup();
 
-    // Compile our C++ shim.
     cc::Build::new()
         .cpp(true)
         .file("src/text_extractor.cpp")
-        // Add the combined include paths.
-        .includes(includes)
-        // Add the flag to compile with the C++20 standard, which is required
-        // by modern versions of the Poppler library.
+        // Add the flag to compile with the C++20 standard.
         .flag("-std=c++20")
+        // Use the .includes() method, which is the idiomatic way to add
+        // header search paths with the cc crate. This avoids breaking
+        // the compiler's standard library search.
+        .includes(includes)
         .compile("text_extractor");
 }
