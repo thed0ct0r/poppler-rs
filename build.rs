@@ -1,8 +1,14 @@
 fn main() {
     // Use pkg-config to find all necessary C/C++ libraries.
-    let poppler_cpp = pkg_config::probe_library("poppler-cpp").unwrap();
-    let poppler_core = pkg_config::probe_library("poppler").unwrap();
-    let glib = pkg_config::probe_library("glib-2.0").unwrap();
+    // By handling the Result, we can provide a much more helpful error
+    // message if a dependency is not found, instead of panicking.
+    let poppler_cpp = pkg_config::probe_library("poppler-cpp")
+        .expect("Failed to find poppler-cpp. Please ensure that the poppler development libraries are installed.");
+    let poppler_core = pkg_config::probe_library("poppler")
+        .expect("Failed to find poppler (core). Please ensure that the poppler development libraries are installed.");
+    let glib = pkg_config::probe_library("glib-2.0").expect(
+        "Failed to find glib-2.0. Please ensure that the glib development libraries are installed.",
+    );
 
     // Combine the include paths from all required libraries.
     let mut includes = poppler_cpp.include_paths;

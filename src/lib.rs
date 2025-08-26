@@ -1,5 +1,6 @@
 use std::ffi::CString;
 use std::os::raw::{c_char, c_double, c_int};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path;
 
 /// Re-exports `cairo` to provide types required for rendering.
@@ -10,7 +11,6 @@ mod ffi;
 mod util;
 
 /// Represents the source from which a PopplerDocument was created.
-/// This is needed to allow our C++ shim to re-open the document.
 #[derive(Debug)]
 enum DocumentSource {
     File { uri: CString },
@@ -20,29 +20,20 @@ enum DocumentSource {
 /// A Poppler PDF document.
 #[derive(Debug)]
 pub struct PopplerDocument {
-    /// The raw pointer to the underlying PopplerDocument GObject.
     doc: *mut ffi::PopplerDocument,
-    /// The source of the document, kept for layout-aware text extraction.
     source: DocumentSource,
-    /// The password used to open the document.
     pw: CString,
 }
 
 /// Represents a page in a [`PopplerDocument`].
-///
-/// The lifetime `'a` ensures that a page can't outlive the document it belongs to.
 #[derive(Debug)]
 pub struct PopplerPage<'a> {
-    /// The raw pointer to the underlying PopplerPage GObject.
     page: *mut ffi::PopplerPage,
-    /// A reference to the parent document.
     doc: &'a PopplerDocument,
-    /// The 0-based index of this page within the document.
     index: c_int,
 }
 
 impl PopplerDocument {
-    /// Creates a new Poppler document from a file path.
     pub fn new_from_file<P: AsRef<path::Path>>(
         p: P,
         password: Option<&str>,
@@ -60,7 +51,6 @@ impl PopplerDocument {
         })
     }
 
-    /// Creates a new Poppler document from a data buffer.
     pub fn new_from_data(
         data: &[u8],
         password: Option<&str>,
@@ -91,7 +81,6 @@ impl PopplerDocument {
         })
     }
 
-    /// Returns the document's title.
     pub fn get_title(&self) -> Option<String> {
         unsafe {
             let ptr = ffi::poppler_document_get_title(self.doc);
@@ -99,7 +88,6 @@ impl PopplerDocument {
         }
     }
 
-    /// Returns the XML metadata string of the document.
     pub fn get_metadata(&self) -> Option<String> {
         unsafe {
             let ptr = ffi::poppler_document_get_metadata(self.doc);
@@ -107,7 +95,6 @@ impl PopplerDocument {
         }
     }
 
-    /// Returns the PDF version of document as a string (e.g. `PDF-1.6`).
     pub fn get_pdf_version_string(&self) -> Option<String> {
         unsafe {
             let ptr = ffi::poppler_document_get_pdf_version_string(self.doc);
@@ -115,17 +102,14 @@ impl PopplerDocument {
         }
     }
 
-    /// Returns the flags specifying which operations are permitted when the document is opened.
     pub fn get_permissions(&self) -> u32 {
         unsafe { ffi::poppler_document_get_permissions(self.doc) as u32 }
     }
 
-    /// Returns the number of pages in a loaded document.
     pub fn get_n_pages(&self) -> usize {
         (unsafe { ffi::poppler_document_get_n_pages(self.doc) }) as usize
     }
 
-    /// Returns the page indexed at `index`.
     pub fn get_page(&self, index: usize) -> Option<PopplerPage<'_>> {
         match unsafe { ffi::poppler_document_get_page(self.doc, index as c_int) } {
             ptr if ptr.is_null() => None,
@@ -137,7 +121,6 @@ impl PopplerDocument {
         }
     }
 
-    /// Returns an iterator over the pages of the document.
     pub fn pages(&self) -> PagesIter<'_> {
         PagesIter {
             total: self.get_n_pages(),
@@ -146,7 +129,6 @@ impl PopplerDocument {
         }
     }
 
-    /// Converts the provided password into a `CString`.
     fn get_password(password: Option<&str>) -> Result<CString, glib::error::Error> {
         let pw_str = password.unwrap_or("");
         CString::new(pw_str).map_err(|_| {
@@ -157,12 +139,10 @@ impl PopplerDocument {
         })
     }
 
-    /// Returns the number of pages.
     pub fn len(&self) -> usize {
         self.get_n_pages()
     }
 
-    /// Indicates whether this document has no pages.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -177,7 +157,6 @@ impl Drop for PopplerDocument {
 }
 
 impl<'a> PopplerPage<'a> {
-    /// Gets the size of page at the current scale and rotation.
     pub fn get_size(&self) -> (f64, f64) {
         let mut width: f64 = 0.0;
         let mut height: f64 = 0.0;
@@ -193,21 +172,18 @@ impl<'a> PopplerPage<'a> {
         (width, height)
     }
 
-    /// Render the page to the given cairo context.
     #[cfg(feature = "render")]
     pub fn render(&self, ctx: &cairo::Context) {
         let ctx_raw = unsafe { ctx.to_raw_none() };
         unsafe { ffi::poppler_page_render(self.page, ctx_raw) }
     }
 
-    /// Render the page to the given cairo context for printing.
     #[cfg(feature = "render")]
     pub fn render_for_printing(&self, ctx: &cairo::Context) {
         let ctx_raw = unsafe { ctx.to_raw_none() };
         unsafe { ffi::poppler_page_render_for_printing(self.page, ctx_raw) }
     }
 
-    /// Retrieves the text of the page (without layout).
     pub fn get_text(&self) -> Option<String> {
         unsafe {
             let ptr = ffi::poppler_page_get_text(self.page);
@@ -215,16 +191,15 @@ impl<'a> PopplerPage<'a> {
         }
     }
 
-    /// **NEW**: Extracts page text, preserving the physical layout, similar to `pdftotext -layout`.
+    /// Extracts page text, preserving the physical layout.
     ///
-    /// This method calls into a custom C++ shim that uses the main Poppler C++ library,
-    /// as the underlying `poppler-glib` C library does not expose layout-preserving
-    /// text extraction.
-    ///
-    /// **Note**: This may have a performance cost as it re-opens and parses the
-    /// PDF document to perform the extraction.
-    pub fn get_text_layout(&self) -> Option<String> {
-        unsafe {
+    /// This function is unwind-safe. If a panic occurs in the underlying
+    /// C++ library, it will be caught and returned as an `Err`, preventing
+    /// undefined behavior.
+    pub fn get_text_layout(&self) -> anyhow::Result<Option<String>> {
+        // Use catch_unwind to ensure that a panic in the C++ code does not
+        // cross the FFI boundary, which would be undefined behavior.
+        catch_unwind(AssertUnwindSafe(|| unsafe {
             let ptr = match &self.doc.source {
                 DocumentSource::File { uri } => ffi::extract_text_layout_from_file(
                     uri.as_ptr(),
@@ -239,7 +214,8 @@ impl<'a> PopplerPage<'a> {
                 ),
             };
             util::take_c_owned_string(ptr)
-        }
+        }))
+        .map_err(|err| anyhow::anyhow!("failed ffi call in underlying poppler c code => {err:?}"))
     }
 }
 
@@ -286,7 +262,30 @@ mod tests {
         let page = doc.get_page(0).unwrap();
 
         let simple_text = page.get_text().unwrap_or_default();
-        let layout_text = page.get_text_layout().unwrap_or_default();
+        let layout_text = page
+            .get_text_layout()
+            .expect("could not get text layout")
+            .unwrap_or_default();
+
+        println!("--- Simple Text ---\n{}", simple_text);
+        println!("--- Layout Text ---\n{}", layout_text);
+
+        // In a real test, you would assert that layout_text contains
+        // formatting (like multiple spaces) that simple_text does not.
+        assert!(!layout_text.is_empty());
+    }
+
+    #[test]
+    fn test_layout_extraction2() {
+        let filename = "us1.pdf"; // Make sure you have a test PDF
+        let doc = super::PopplerDocument::new_from_file(filename, None).unwrap();
+        let page = doc.get_page(0).unwrap();
+
+        let simple_text = page.get_text().unwrap_or_default();
+        let layout_text = page
+            .get_text_layout()
+            .expect("could not get text layout")
+            .unwrap_or_default();
 
         println!("--- Simple Text ---\n{}", simple_text);
         println!("--- Layout Text ---\n{}", layout_text);

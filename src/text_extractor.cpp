@@ -1,5 +1,5 @@
-// Final version using the modern C++ API of Poppler,
-// addressing specific compiler errors related to API version mismatches.
+// This version is updated to match the modern C++ API of Poppler,
+// resolving specific type mismatches identified during compilation.
 
 #include <PDFDoc.h>
 #include <PDFDocFactory.h>
@@ -12,7 +12,6 @@
 // Headers for creating a document from a memory buffer
 #include <Object.h>
 #include <Stream.h>
-
 
 extern "C" {
     /**
@@ -30,49 +29,50 @@ extern "C" {
             return nullptr;
         }
 
-        std::string path_str(uri);
-        if (path_str.rfind("file://", 0) == 0) {
-            path_str.erase(0, 7);
-        }
+        try {
+            std::string path_str(uri);
+            if (path_str.rfind("file://", 0) == 0) {
+                path_str.erase(0, 7);
+            }
 
-        GooString file_name(path_str.c_str());
-        std::optional<GooString> user_pw;
-        if (password && password[0] != '\0') {
-            user_pw.emplace(password);
-        }
+            GooString file_name(path_str.c_str());
+            std::optional<GooString> user_pw;
+            if (password && password[0] != '\0') {
+                user_pw.emplace(password);
+            }
 
-        // Use the factory to create a PDFDoc, which returns a unique_ptr.
-        // The password arguments are now std::optional.
-        std::unique_ptr<PDFDoc> doc = PDFDocFactory().createPDFDoc(file_name, user_pw, {});
-        
-        if (!doc || !doc->isOk()) {
+            // The factory returns a std::unique_ptr, which correctly manages the memory.
+            std::unique_ptr<PDFDoc> doc = PDFDocFactory().createPDFDoc(file_name, user_pw, {});
+            
+            if (!doc || !doc->isOk()) {
+                return nullptr;
+            }
+
+            int page_num = page_index + 1;
+            if (page_num <= 0 || page_num > doc->getNumPages()) {
+                return nullptr;
+            }
+
+            TextOutputDev text_dev(nullptr, true, 2.0, false, false);
+            if (!text_dev.isOk()) {
+                return nullptr;
+            }
+
+            doc->displayPage(&text_dev, page_num, 72.0, 72.0, 0, false, true, false);
+
+            double page_w = doc->getPageMediaWidth(page_num);
+            double page_h = doc->getPageMediaHeight(page_num);
+            
+            GooString text = text_dev.getText(0, 0, page_w, page_h);
+            char *result = nullptr;
+            if (text.c_str()) {
+                result = g_strdup(text.c_str());
+            }
+            
+            return result;
+        } catch (...) {
             return nullptr;
         }
-
-        // Page numbers in PDFDoc are 1-based.
-        int page_num = page_index + 1;
-        if (page_num <= 0 || page_num > doc->getNumPages()) {
-            return nullptr;
-        }
-
-        TextOutputDev text_dev(nullptr, true, 2.0, false, false);
-        if (!text_dev.isOk()) {
-            return nullptr;
-        }
-
-        doc->displayPage(&text_dev, page_num, 72.0, 72.0, 0, false, true, false);
-
-        double page_w = doc->getPageMediaWidth(page_num);
-        double page_h = doc->getPageMediaHeight(page_num);
-        
-        // Modern Poppler's getText returns a GooString by value.
-        GooString text = text_dev.getText(0, 0, page_w, page_h);
-        char *result = nullptr;
-        if (text.c_str()) {
-            result = g_strdup(text.c_str());
-        }
-        
-        return result;
     }
 
     /**
@@ -90,46 +90,49 @@ extern "C" {
             return nullptr;
         }
 
-        std::optional<GooString> user_pw;
-        if (password && password[0] != '\0') {
-            user_pw.emplace(password);
-        }
+        try {
+            std::optional<GooString> user_pw;
+            if (password && password[0] != '\0') {
+                user_pw.emplace(password);
+            }
 
-        // Create a MemStream to read from the data buffer.
-        // The constructor for MemStream takes an rvalue reference for the Object,
-        // so we use the static `Object::null()` method to create a temporary.
-        BaseStream *stream = new MemStream((char*)data, 0, length, Object::null());
-        
-        // The PDFDoc constructor for streams also takes std::optional for passwords.
-        std::unique_ptr<PDFDoc> doc(new PDFDoc(stream, user_pw, {}));
+            // The MemStream constructor requires an rvalue reference for the Object,
+            // so we construct it in-place with Object::null().
+            BaseStream *stream = new MemStream((char*)data, 0, length, Object::null());
+            
+            // The PDFDoc constructor for streams also takes std::optional for passwords.
+            std::unique_ptr<PDFDoc> doc(new PDFDoc(stream, user_pw, {}));
 
-        if (!doc || !doc->isOk()) {
+            if (!doc || !doc->isOk()) {
+                return nullptr;
+            }
+
+            int page_num = page_index + 1;
+            if (page_num <= 0 || page_num > doc->getNumPages()) {
+                return nullptr;
+            }
+
+            TextOutputDev text_dev(nullptr, true, 2.0, false, false);
+            if (!text_dev.isOk()) {
+                return nullptr;
+            }
+
+            doc->displayPage(&text_dev, page_num, 72.0, 72.0, 0, false, true, false);
+
+            double page_w = doc->getPageMediaWidth(page_num);
+            double page_h = doc->getPageMediaHeight(page_num);
+            
+            GooString text = text_dev.getText(0, 0, page_w, page_h);
+            
+            char *result = nullptr;
+            if (text.c_str()) {
+                result = g_strdup(text.c_str());
+            }
+            
+            // The unique_ptr for doc will handle deletion, which also deletes the stream.
+            return result;
+        } catch (...) {
             return nullptr;
         }
-
-        int page_num = page_index + 1;
-        if (page_num <= 0 || page_num > doc->getNumPages()) {
-            return nullptr;
-        }
-
-        TextOutputDev text_dev(nullptr, true, 2.0, false, false);
-        if (!text_dev.isOk()) {
-            return nullptr;
-        }
-
-        doc->displayPage(&text_dev, page_num, 72.0, 72.0, 0, false, true, false);
-
-        double page_w = doc->getPageMediaWidth(page_num);
-        double page_h = doc->getPageMediaHeight(page_num);
-        
-        GooString text = text_dev.getText(0, 0, page_w, page_h);
-        
-        char *result = nullptr;
-        if (text.c_str()) {
-            result = g_strdup(text.c_str());
-        }
-        
-        // The unique_ptr for doc will handle deletion, which also deletes the stream.
-        return result;
     }
 }
