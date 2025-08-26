@@ -4,6 +4,31 @@ use std::os::raw::c_char;
 
 use glib::translate::FromGlibPtrFull;
 
+/// Copies an array of `PopplerRectangle` that was allocated with
+/// GLib’s `g_malloc` / `g_new` and frees the original.
+///
+/// Safety:
+///   * `ptr` must either be NULL or point to `n` valid
+///     `PopplerRectangle`s allocated by GLib.
+///   * After this call the caller must **not** use `ptr` any more.
+pub unsafe fn take_c_owned_rect_array(
+    ptr: *mut crate::ffi::PopplerRectangle,
+    n: usize,
+) -> Vec<crate::ffi::PopplerRectangle> {
+    if ptr.is_null() || n == 0 {
+        Vec::new()
+    } else {
+        let slice = std::slice::from_raw_parts(ptr, n);
+        let v = slice.to_vec();
+
+        // free with GLib
+        glib::ffi::g_free(ptr as *mut _);
+
+        // return owned rust vec
+        v
+    }
+}
+
 /// creates a rust-owned string, copies the memory from c-allocated
 /// glib code - and then frees it correctly so we do not leak
 /// or hold dangling pointers

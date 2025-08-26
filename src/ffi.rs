@@ -1,6 +1,7 @@
 use std::os::raw::{c_char, c_double, c_int, c_uint};
 
 #[repr(C)]
+#[derive(Copy, Clone, Debug)]
 pub struct PopplerRectangle {
     pub x1: c_double,
     pub y1: c_double,

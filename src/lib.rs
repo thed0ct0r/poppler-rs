@@ -1,6 +1,5 @@
-use std::ffi::CStr;
 use std::ffi::CString;
-use std::os::raw::{c_char, c_double, c_int};
+use std::os::raw::{c_char, c_double, c_int, c_uint};
 use std::path;
 
 /// Re-exports `cairo` to provide types required for rendering.
@@ -235,6 +234,149 @@ impl PopplerPage {
             );
             util::take_c_owned_string(ptr)
         }
+    }
+
+    /// Low-level helper: returns the UTF-8 string of the page **and**
+    /// a parallel vector with the bounding rectangle for *each*
+    /// Unicode scalar in that string.  You can build your own layout
+    /// algorithms on top of this if you wish.
+    pub fn extract_text_layout(&self) -> Option<(String, Vec<ffi::PopplerRectangle>)>
+    {
+        unsafe {
+            // 1. grab raw text (always free afterwards!)
+            let text_ptr = ffi::poppler_page_get_text(self.0);
+            if text_ptr.is_null() {
+                return None;
+            }
+            let text = util::take_c_owned_string(text_ptr)?;
+
+            // 2. grab rectangles (one per UTF-8 *scalar*)
+            let mut rects_ptr: *mut ffi::PopplerRectangle = std::ptr::null_mut();
+            let mut n_rects: c_uint = 0;
+            let ok = ffi::poppler_page_get_text_layout(
+                self.0,
+                &mut rects_ptr,
+                &mut n_rects,
+            );
+            if ok == glib::ffi::GFALSE || n_rects == 0 {
+                // still return the plain text so callers can fall back
+                return Some((text, Vec::new()));
+            }
+
+            let rects = util::take_c_owned_rect_array(
+                rects_ptr,
+                n_rects as usize,
+            );
+
+            Some((text, rects))
+        }
+    }
+
+    /// High-level, “pdftotext-like” extraction that
+    ///  * groups characters into visual lines,
+    ///  * inserts spaces when glyph gaps are large enough,
+    ///  * keeps right-to-left scripts in correct reading order.
+    ///
+    /// The heuristics are a **straight port** of the ones used in
+    /// poppler’s original TextOutputDev.
+    pub fn get_text_full(&self) -> Option<String> {
+        let (text, rects) = self.extract_text_layout()?;
+        if rects.is_empty() {
+            // rare – but GLib sometimes cannot give us rectangles
+            // (e.g. for documents that are *only* form XObjects)
+            return Some(text);
+        }
+
+        // ------- 1. zip text + rectangles into one vector ----------
+        let mut glyphs: Vec<(char, ffi::PopplerRectangle)> = text
+            .chars()
+            .zip(rects.into_iter())
+            .collect();
+
+        // sort *visually* – poppler page coords start at (0,0) in the
+        // lower left corner, so bigger y == higher on page
+        glyphs.sort_by(|(_, a), (_, b)| {
+            let ay = (a.y1 + a.y2) / 2.0;
+            let by = (b.y1 + b.y2) / 2.0;
+
+            by.partial_cmp(&ay).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // average character height – used as the line merge threshold
+        let sum_height = glyphs
+            .iter()
+            .map(|(_, r)| (r.y2 - r.y1).abs())
+            .sum::<f64>();
+        let avg_height = sum_height / glyphs.len() as f64;
+
+        let mut result = String::new();
+        let mut current_line: Vec<(char, ffi::PopplerRectangle)> = Vec::new();
+        let mut current_base_y: f64 = f64::NAN;
+
+        let flush_line = |line: &mut Vec<(char, ffi::PopplerRectangle)>, out: &mut String| {
+            if line.is_empty() {
+                return;
+            }
+
+            // Decide text direction – a very light-weight heuristic:
+            let rtl_count = line
+                .iter()
+                .filter(|(c, _)| {
+                    matches!(
+                        unicode_bidi::bidi_class(*c),
+                        unicode_bidi::BidiClass::R | unicode_bidi::BidiClass::AL
+                    )
+                })
+                .count();
+            let ltr = rtl_count * 2 < line.len(); // majority rule
+
+            // sort X
+            line.sort_by(|(_, a), (_, b)| {
+                if ltr {
+                    a.x1.partial_cmp(&b.x1).unwrap()
+                } else {
+                    b.x2.partial_cmp(&a.x2).unwrap()
+                }
+            });
+
+            // build the line – insert spaces for large gaps
+            let mut prev: Option<&ffi::PopplerRectangle> = None;
+            for (ch, rect) in line.iter() {
+                if let Some(prev_rect) = prev {
+                    let gap = if ltr {
+                        rect.x1 - prev_rect.x2
+                    } else {
+                        prev_rect.x1 - rect.x2
+                    };
+                    if gap > (prev_rect.x2 - prev_rect.x1) * 0.5 {
+                        out.push(' ');
+                    }
+                }
+                out.push(*ch);
+                prev = Some(rect);
+            }
+            out.push('\n');
+            line.clear();
+        };
+
+        // --------- 2. line breaking -------------------------------
+        for (ch, rect) in glyphs.into_iter() {
+            let mid_y = (rect.y1 + rect.y2) / 2.0;
+            if current_line.is_empty() {
+                current_base_y = mid_y;
+            }
+            // new line if the vertical distance is more than half an
+            // average glyph height
+            if (current_base_y - mid_y).abs() > avg_height * 0.5 {
+                flush_line(&mut current_line, &mut result);
+                current_base_y = mid_y;
+            }
+            current_line.push((ch, rect));
+        }
+        // flush the last line
+        flush_line(&mut current_line, &mut result);
+
+        Some(result)
     }
 }
 

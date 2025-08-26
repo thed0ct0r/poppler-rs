@@ -17,3 +17,4 @@ render = ["dep:cairo-rs"]
 cairo-rs = { version = "0.20.5", features = ["png", "pdf"], optional = true }
 glib = "0.20.6"
 gobject-sys = "0.20"
+unicode-bidi = "0.3"
