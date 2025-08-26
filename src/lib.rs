@@ -210,7 +210,7 @@ impl PopplerPage {
     pub fn get_page_text(&self) -> Option<String> {
         unsafe {
             // Prefer content bounding box if available
-            let mut bbox = ffi::PopplerRectangle { x1: 0.0, y1: 0.0, x2: 0.0, y2: 0.0 };
+            /*let mut bbox = ffi::PopplerRectangle { x1: 0.0, y1: 0.0, x2: 0.0, y2: 0.0 };
             let has_bbox = ffi::poppler_page_get_bounding_box(self.0, &mut bbox);
 
             if has_bbox == glib::ffi::GTRUE {
@@ -219,10 +219,11 @@ impl PopplerPage {
                     ffi::PopplerSelectionStyle::Line,
                     &mut bbox,
                 );
+
                 if !ptr.is_null() {
                     return util::take_c_owned_string(ptr);
                 }
-            }
+            }*/
 
             // Fallback: full page rectangle
             let (w, h) = self.get_size();
