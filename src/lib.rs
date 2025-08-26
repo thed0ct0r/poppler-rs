@@ -199,10 +199,40 @@ impl PopplerPage {
     }
 
     /// Retrieves the text of the page.
-    pub fn get_text(&self) -> Option<&str> {
-        match unsafe { ffi::poppler_page_get_text(self.0) } {
-            ptr if ptr.is_null() => None,
-            ptr => unsafe { Some(CStr::from_ptr(ptr).to_str().unwrap_or_default()) },
+    pub fn get_text(&self) -> Option<String> {
+        unsafe {
+            let ptr = ffi::poppler_page_get_text(self.0);
+            util::take_c_owned_string(ptr)
+        }
+    }
+
+    // New: “complete” text extraction similar to pdftotext default behavior
+    pub fn get_page_text(&self) -> Option<String> {
+        unsafe {
+            // Prefer content bounding box if available
+            let mut bbox = ffi::PopplerRectangle { x1: 0.0, y1: 0.0, x2: 0.0, y2: 0.0 };
+            let has_bbox = ffi::poppler_page_get_bounding_box(self.0, &mut bbox);
+
+            if has_bbox == glib::ffi::GTRUE {
+                let ptr = ffi::poppler_page_get_selected_text(
+                    self.0,
+                    ffi::PopplerSelectionStyle::Line,
+                    &mut bbox,
+                );
+                if !ptr.is_null() {
+                    return util::take_c_owned_string(ptr);
+                }
+            }
+
+            // Fallback: full page rectangle
+            let (w, h) = self.get_size();
+            let mut full = ffi::PopplerRectangle { x1: 0.0, y1: 0.0, x2: w, y2: h };
+            let ptr = ffi::poppler_page_get_selected_text(
+                self.0,
+                ffi::PopplerSelectionStyle::Line,
+                &mut full,
+            );
+            util::take_c_owned_string(ptr)
         }
     }
 }
