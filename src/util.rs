@@ -1,7 +1,26 @@
-use std::ffi::{CString, OsString};
+use std::ffi::{CStr, CString, OsString};
 use std::{fs, path, ptr};
+use std::os::raw::c_char;
 
 use glib::translate::FromGlibPtrFull;
+
+/// creates a rust-owned string, copies the memory from c-allocated
+/// glib code - and then frees it correctly so we do not leak
+/// or hold dangling pointers
+pub unsafe fn take_c_owned_string(ptr: *mut c_char) -> Option<String> {
+    if ptr.is_null() {
+        return None;
+    }
+
+    // Copy to Rust String
+    let s = CStr::from_ptr(ptr).to_string_lossy().into_owned();
+
+    // Free with GLib
+    glib::ffi::g_free(ptr as *mut _);
+
+    // returned an owned rust-allocated string
+    Some(s)
+}
 
 pub fn call_with_gerror<T, F>(f: F) -> Result<*mut T, glib::error::Error>
 where

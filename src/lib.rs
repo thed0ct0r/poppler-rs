@@ -62,42 +62,30 @@ impl PopplerDocument {
     /// Returns the document's title.
     pub fn get_title(&self) -> Option<String> {
         unsafe {
-            let ptr: *mut c_char = ffi::poppler_document_get_title(self.0);
-            if ptr.is_null() {
-                None
-            } else {
-                CString::from_raw(ptr).into_string().ok()
-            }
+            let ptr = ffi::poppler_document_get_title(self.0);
+            util::take_c_owned_string(ptr)
         }
     }
 
     /// Returns the XML metadata string of the document.
     pub fn get_metadata(&self) -> Option<String> {
         unsafe {
-            let ptr: *mut c_char = ffi::poppler_document_get_metadata(self.0);
-            if ptr.is_null() {
-                None
-            } else {
-                CString::from_raw(ptr).into_string().ok()
-            }
+            let ptr = ffi::poppler_document_get_metadata(self.0);
+            util::take_c_owned_string(ptr)
         }
     }
 
     /// Returns the PDF version of document as a string (e.g. `PDF-1.6`).
     pub fn get_pdf_version_string(&self) -> Option<String> {
         unsafe {
-            let ptr: *mut c_char = ffi::poppler_document_get_pdf_version_string(self.0);
-            if ptr.is_null() {
-                None
-            } else {
-                CString::from_raw(ptr).into_string().ok()
-            }
+            let ptr = ffi::poppler_document_get_pdf_version_string(self.0);
+            util::take_c_owned_string(ptr)
         }
     }
 
     /// Returns the flags specifying which operations are permitted when the document is opened.
-    pub fn get_permissions(&self) -> u8 {
-        unsafe { ffi::poppler_document_get_permissions(self.0) as u8 }
+    pub fn get_permissions(&self) -> u32 {
+        unsafe { ffi::poppler_document_get_permissions(self.0) as u32 }
     }
 
     /// Returns the number of pages in a loaded document.
@@ -115,7 +103,7 @@ impl PopplerDocument {
         }
     }
 
-    pub fn pages(&self) -> PagesIter {
+    pub fn pages(&self) -> PagesIter<'_> {
         PagesIter {
             total: self.get_n_pages(),
             index: 0,
