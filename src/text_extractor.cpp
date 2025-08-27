@@ -13,6 +13,9 @@
 #include <Object.h>
 #include <Stream.h>
 
+// Include the poppler version header to get version macros
+#include <poppler-version.h>
+
 extern "C" {
     /**
      * @brief Extracts text from a page of a PDF file, preserving physical layout.
@@ -43,7 +46,7 @@ extern "C" {
 
             // The factory returns a std::unique_ptr, which correctly manages the memory.
             std::unique_ptr<PDFDoc> doc = PDFDocFactory().createPDFDoc(file_name, user_pw, {});
-            
+
             if (!doc || !doc->isOk()) {
                 return nullptr;
             }
@@ -62,13 +65,13 @@ extern "C" {
 
             double page_w = doc->getPageMediaWidth(page_num);
             double page_h = doc->getPageMediaHeight(page_num);
-            
+
             GooString text = text_dev.getText(0, 0, page_w, page_h);
             char *result = nullptr;
             if (text.c_str()) {
                 result = g_strdup(text.c_str());
             }
-            
+
             return result;
         } catch (...) {
             return nullptr;
@@ -95,11 +98,17 @@ extern "C" {
             if (password && password[0] != '\0') {
                 user_pw.emplace(password);
             }
-
-            // The MemStream constructor requires an rvalue reference for the Object,
-            // so we construct it in-place with Object::null().
-            BaseStream *stream = new MemStream((char*)data, 0, length, Object::null());
             
+            // Conditionally compile based on the Poppler version.
+            // The API breaking change happened in version 22.04.
+            #if (POPPLER_VERSION_MAJOR < 22) || (POPPLER_VERSION_MAJOR == 22 && POPPLER_VERSION_MINOR < 4)
+                // New API (v22.04+): Construct a null object.
+                BaseStream *stream = new MemStream((char*)data, 0, length, Object(Object::nullObj));
+            #else
+                // Old API (<v22.04): Use the static null() method.
+                BaseStream *stream = new MemStream((char*)data, 0, length, Object::null());
+            #endif
+
             // The PDFDoc constructor for streams also takes std::optional for passwords.
             std::unique_ptr<PDFDoc> doc(new PDFDoc(stream, user_pw, {}));
 
@@ -121,14 +130,14 @@ extern "C" {
 
             double page_w = doc->getPageMediaWidth(page_num);
             double page_h = doc->getPageMediaHeight(page_num);
-            
+
             GooString text = text_dev.getText(0, 0, page_w, page_h);
-            
+
             char *result = nullptr;
             if (text.c_str()) {
                 result = g_strdup(text.c_str());
             }
-            
+
             // The unique_ptr for doc will handle deletion, which also deletes the stream.
             return result;
         } catch (...) {
