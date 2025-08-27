@@ -101,7 +101,12 @@ extern "C" {
             
             // Create a null object for the MemStream dictionary.
             // The API for this has changed multiple times in poppler's history.
-            #if (POPPLER_VERSION_MAJOR > 24) || (POPPLER_VERSION_MAJOR == 24 && POPPLER_VERSION_MINOR >= 4)
+            // Workaround for inconsistent poppler packaging in Debian Trixie.
+            // Version 25.03.0 reports a new version number but contains old headers.
+            #if (POPPLER_VERSION_MAJOR == 25 && POPPLER_VERSION_MINOR == 3)
+                // SPECIAL CASE: Trixie's 25.03 uses the 22.04-24.03 API.
+                BaseStream *stream = new MemStream((char*)data, 0, length, Object(Object::nullObj));
+            #elif (POPPLER_VERSION_MAJOR > 24) || (POPPLER_VERSION_MAJOR == 24 && POPPLER_VERSION_MINOR >= 4)
                 // Newest API (24.04+): Object::null() was re-introduced.
                 BaseStream *stream = new MemStream((char*)data, 0, length, Object::null());
             #elif (POPPLER_VERSION_MAJOR > 22) || (POPPLER_VERSION_MAJOR == 22 && POPPLER_VERSION_MINOR >= 4)
