@@ -105,13 +105,13 @@ extern "C" {
             // Version 25.03.0 reports a new version number but contains old headers.
             #if (POPPLER_VERSION_MAJOR == 25 && POPPLER_VERSION_MINOR == 3)
                 // SPECIAL CASE: Trixie's 25.03 uses the 22.04-24.03 API.
-                BaseStream *stream = new MemStream((char*)data, 0, length, Object(Object::nullObj));
+                BaseStream *stream = new MemStream((char*)data, 0, length, Object(objNull));
             #elif (POPPLER_VERSION_MAJOR > 24) || (POPPLER_VERSION_MAJOR == 24 && POPPLER_VERSION_MINOR >= 4)
                 // Newest API (24.04+): Object::null() was re-introduced.
                 BaseStream *stream = new MemStream((char*)data, 0, length, Object::null());
             #elif (POPPLER_VERSION_MAJOR > 22) || (POPPLER_VERSION_MAJOR == 22 && POPPLER_VERSION_MINOR >= 4)
                 // API from 22.04 to 24.03: Use Object(Object::nullObj).
-                BaseStream *stream = new MemStream((char*)data, 0, length, Object(Object::nullObj));
+                BaseStream *stream = new MemStream((char*)data, 0, length, Object(objNull));
             #elif (POPPLER_VERSION_MAJOR > 22) || (POPPLER_VERSION_MAJOR == 22 && POPPLER_VERSION_MINOR >= 1)
                 // API from 22.01 to 22.03: Use the default constructor.
                 BaseStream *stream = new MemStream((char*)data, 0, length, Object());
