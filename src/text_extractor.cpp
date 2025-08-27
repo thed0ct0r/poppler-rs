@@ -99,13 +99,19 @@ extern "C" {
                 user_pw.emplace(password);
             }
             
-            // Conditionally compile based on the Poppler version.
-            // The API breaking change happened in version 22.04.
-            #if (POPPLER_VERSION_MAJOR < 22) || (POPPLER_VERSION_MAJOR == 22 && POPPLER_VERSION_MINOR < 4)
-                // New API (v22.04+): Construct a null object.
+            // Create a null object for the MemStream dictionary.
+            // The API for this has changed multiple times in poppler's history.
+            #if (POPPLER_VERSION_MAJOR > 24) || (POPPLER_VERSION_MAJOR == 24 && POPPLER_VERSION_MINOR >= 4)
+                // Newest API (24.04+): Object::null() was re-introduced.
+                BaseStream *stream = new MemStream((char*)data, 0, length, Object::null());
+            #elif (POPPLER_VERSION_MAJOR > 22) || (POPPLER_VERSION_MAJOR == 22 && POPPLER_VERSION_MINOR >= 4)
+                // API from 22.04 to 24.03: Use Object(Object::nullObj).
                 BaseStream *stream = new MemStream((char*)data, 0, length, Object(Object::nullObj));
+            #elif (POPPLER_VERSION_MAJOR > 22) || (POPPLER_VERSION_MAJOR == 22 && POPPLER_VERSION_MINOR >= 1)
+                // API from 22.01 to 22.03: Use the default constructor.
+                BaseStream *stream = new MemStream((char*)data, 0, length, Object());
             #else
-                // Old API (<v22.04): Use the static null() method.
+                // Old API (< 22.01): Use the original Object::null().
                 BaseStream *stream = new MemStream((char*)data, 0, length, Object::null());
             #endif
 
